@@ -213,10 +213,6 @@ html { scroll-padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
 .semester-events { margin: 0; padding-inline-start: 1.4rem; }
 .semester-events li + li { margin-block-start: .55rem; }
 .semester-archive .folio { padding-inline: 0; border-inline: 0; }
-@media (max-width: 345px) {
-  .semester-courses { grid-template-columns: 1fr; }
-  .semester-course { min-height: 48px; }
-}
 
 .semester-playback label { font-weight: 800; }
 .semester-playback #semester-progress {
@@ -243,3 +239,59 @@ html { scroll-padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
 .attribute-reroll [aria-disabled="true"] { background: #f1ece1; color: #645747; cursor: default; }
 .campus-event { margin-block-start: 8px; padding: 9px 12px; border-inline-start: 3px solid var(--green); background: #e5eddf; }
 .campus-event p { margin-block-start: 3px; }
+
+@media (max-width: 480px) {
+  main {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  .hero {
+    min-height: clamp(11rem, 34svh, 16rem);
+  }
+
+  .folio,
+  .character-panel {
+    padding: 12px;
+  }
+
+  .semester-courses {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .semester-course {
+    min-height: 48px;
+    padding: 10px 12px;
+  }
+
+  .semester-course:has(input:focus-visible) {
+    outline: 3px solid #1375a0;
+    outline-offset: 2px;
+  }
+
+  .semester-grades {
+    table-layout: fixed;
+  }
+
+  .semester-grades tr > :first-child {
+    width: 38%;
+  }
+
+  .semester-grades th,
+  .semester-grades td {
+    overflow-wrap: anywhere;
+    vertical-align: top;
+  }
+
+  .growth-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .character-identity {
+    grid-template-columns: clamp(3.75rem, 20vw, 5.5rem) minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  nav button {
+    min-height: 48px;
+  }
+}
