@@ -33,7 +33,7 @@ $(function () {
   const characterTabs = [['stats','능력치'],['equipment','장비'],['skills','스킬']];
   const achievements = [
     ['마음의 동반자',s=>s.spouse!==null], ['가문의 초석',s=>Boolean(s.house)],
-    ['아르테시아의 대학자',s=>s.research>=24], ['대마법사',s=>s.values[5]>=85],
+    ['아르테시아의 대학자',s=>s.research>=24], ['대마법사',s=>Math.min(s.values[2],s.values[5])>=85],
     ['전설의 모험가',s=>s.floor===7], ['대륙 통일',s=>s.influence>=100],
     ['번영의 상징',s=>s.money>=1000000], ['평온한 삶',s=>s.rests>=36]
   ];
@@ -51,6 +51,7 @@ $(function () {
     s.stamina=s.stamina??s.energy??100;
     s.semesterReports??=[];
     s.skills??={};
+    s.skillXp??={};
     if(s.graduationTurn==null){
       const graduated=Boolean(s.job||s.stage==='career'||s.story.start!=null);
       const previousAdmissionAge=s.admissionAge??13;
@@ -116,14 +117,17 @@ $(function () {
     page=next;render();$game.find('h1').trigger('focus');window.scrollTo(0,0);
     if(next==='simulation')scheduleSemester();
   }
+  const wholeStat = Math.floor;
+  const statProgress = value=>Math.min(99,Math.floor((value-wholeStat(value))*100+0.0000001));
+  const formatGrowth = value=>Number(value.toFixed(4));
+  const statReading = value=>wholeStat(value)+(value>=100?' <small>최대</small>':' <small>다음 수치 '+statProgress(value)+'%</small>');
   function statView(values, max=100){
-    return '<dl class="stats">'+values.map((value,i)=>'<div><dt>'+stats[i]+'</dt><dd><meter min="0" max="'+max+'" value="'+value+'" aria-label="'+stats[i]+' '+value+'"></meter></dd><dd>'+value+'</dd></div>').join('')+'</dl>';
+    return '<dl class="stats">'+values.map((value,i)=>
+      '<div><dt>'+stats[i]+'</dt><dd><meter min="0" max="'+max+'" value="'+wholeStat(value)+'" aria-label="'+stats[i]+'"></meter></dd>'+
+      '<dd>'+statReading(value)+'</dd></div>').join('')+'</dl>';
   }
   function rollAttributes(person){
-    const values=[2,2,2,2,10,10];
-    for(let point=0;point<18;point++)values[random(4)]++;
-    values[person.specialty]+=5;
-    return values;
+    return academy.rollAttributes(person.specialty,random);
   }
   function registrationRoster(gender){
     return people.filter(person=>person.gender===gender).sort((a,b)=>a.specialty-b.specialty);
@@ -145,7 +149,7 @@ $(function () {
   }
   function init(player, values, replay=null){
     s={version:1,...player,values,element:null,elementCurriculum:true,admissionAge:academy.admissionAge,graduationTurn:academy.finalTurn,major:null,stage:'school',turn:0,money:3000,stamina:100,
-      years:[],semesterReports:[],termSocial:[],termEvents:[],skills:{},job:null,career:0,research:0,influence:0,
+      years:[],semesterReports:[],termSocial:[],termEvents:[],skills:{},skillXp:{},job:null,career:0,research:0,influence:0,
       rests:0,house:'',spouse:null,family:0,relations:people.map(()=>null),
       floor:0,equipment:0,partner:null,partyFunds:0,log:[],
       entryValues:[...values],story:plot.create(replay?.story)};
@@ -153,7 +157,8 @@ $(function () {
     say('아카데미에 입학했다.');persist();goto('life');
   }
   function replayStory(){
-    const values=s.entryValues||s.years.reduce((base,year)=>base.map((value,i)=>value-year.growth[i]), s.yearBase);
+    const person=people.find(playerPerson);
+    const values=total(s.entryValues??[])===45?s.entryValues:rollAttributes(person);
     init({name:s.name,gender:s.gender,portrait:s.portrait},[...values],s);
   }
   function monthPass(message, elapsed=1){
@@ -358,11 +363,15 @@ $(function () {
       relation.trust=clamp(relation.trust+event.trust);
     });
     if(term.awakening!=null)s.element=term.awakening;
-    const skillResults=term.results.filter(result=>result.skill&&result.grade!=='F');
-    term.skillTraining=skillResults.map(({skill})=>{
+    term.skillTraining=[];
+    for(const {skill,grade} of term.results){
+      if(!skill)continue;
       const previous=s.skills[skill]??0;
-      return {skill,previous,level:advanceSkill(skill)};
-    }).filter(result=>result.level>result.previous);
+      const legacy=term.growthRules!==2;
+      if((legacy&&grade==='F')||(!legacy&&!previous&&grade==='D'))continue;
+      const entry=advanceSkill(skill,legacy?100:academy.skillExperience(grade));
+      if(entry.level!==previous||entry.earned)term.skillTraining.push(entry);
+    }
     s.values=term.after;
     s.stamina=clamp(s.stamina+30);
     s.turn=term.endTurn;
@@ -374,7 +383,7 @@ $(function () {
     report(term.skillTraining.map(skillTrainingText).join(' '));
 
   }
-  function gain(i,n){s.values[i]=clamp(s.values[i]+n);}
+  function gain(i,n){s.values[i]=academy.grow(s.values[i],n);}
   function effort(cost){
     if(s.stamina>=cost){s.stamina-=cost;return true;}
     const message='스태미나가 부족합니다. 휴식을 선택하세요.';
@@ -397,7 +406,7 @@ $(function () {
   function selectedAttributes(){
     const index=draftPerson();
     const values=draft.rolls[index];
-    return '<h2>시작 능력치</h2><p class="small"><strong>총합 '+total(values)+'점</strong> · 체력과 마나 각 10점</p>'+
+    return '<h2>시작 능력치</h2><p class="small"><strong>총합 '+total(values)+'점</strong> · 체력과 마나 각 10점</p><p class="small">힘·민첩·지력·센스에 20점을 배분하고, 가장 높은 재능 능력치에 5점을 더합니다.</p>'+
       '<p class="small">'+stats[people[index].specialty]+' 재능은 시작 능력치 +5와 관련 과목 성적 +'+academy.talentScoreBonus+'점을 받습니다.</p>'+statView(values,25);
   }
   function create(){
@@ -439,7 +448,7 @@ $(function () {
         (stat===talent?' · 재능 성적 +'+academy.talentScoreBonus+'점':'');
       const level=skill?s.skills[skill]??0:0;
       const technique=skill?'<small class="course-technique">'+academy.skills[skill].name+
-        (level===0?' 습득':level<academy.maxSkillLevel?' 숙련 Lv.'+(level+1):' · 최대 숙련')+'</small>':'';
+        (level===0?' 습득 가능':level<academy.maxSkillLevel?' 숙련 경험치 획득':' · 최대 숙련')+'</small>':'';
       const label='<span><strong>'+name+'</strong><small>'+detail+'</small>'+technique+'</span>';
       if(required)return '<div class="semester-course required-course">'+label+'</div>';
       return '<label class="semester-course"><input type="checkbox" name="course" value="'+i+'" '+(picks.includes(i)?'checked':'')+'>'+label+'</label>';
@@ -448,7 +457,7 @@ $(function () {
       '<form id="semester-form"><section class="folio"><h2>공통 필수</h2>'+courses[0]+'</section>'+
       '<fieldset class="candidate-field" aria-describedby="semester-guide semester-count">'+
       '<legend>선택 과목 7개</legend><p id="semester-guide">아래 과목 중 '+electiveCount+'개를 고르세요.'+
-      (s.major?' 기술 과목은 E 이상을 받으면 기술을 배우거나 숙련도가 오릅니다.':'')+'</p>'+
+      (s.major?' 기술 과목은 C 이상을 받으면 새 기술을 배웁니다. 이미 배운 기술은 성적에 따라 숙련 경험치가 오릅니다.':'')+'</p>'+
       '<p id="semester-count" class="small semester-count">'+picks.length+' / '+electiveCount+'과목 선택</p>'+
       '<p id="semester-limit" class="small semester-limit" hidden></p>'+
       '<div class="semester-courses">'+courses.slice(1).join('')+'</div></fieldset>'+
@@ -492,11 +501,11 @@ $(function () {
       '<section class="folio"><h2>과목별 성적</h2><table class="semester-grades">'+
       '<thead><tr><th scope="col">과목</th><th scope="col">성적</th><th scope="col">능력치 변화</th></tr></thead><tbody>'+
       term.results.map(result=>'<tr><th scope="row">'+result.name+(result.required?' <small>공통 필수</small>':'')+'</th><td><strong>'+result.grade+'</strong><br>'+result.score+'점'+(result.talentBonus?'<br><small>재능 +'+result.talentBonus+'점</small>':'')+'</td><td>'+
-        stats[result.stat]+' +'+result.gain+(result.secondary===undefined?'':'<br>'+stats[result.secondary]+' +'+result.secondaryGain)+'</td></tr>').join('')+'</tbody></table></section>'+
+        stats[result.stat]+' +'+formatGrowth(result.gain)+(result.secondary===undefined?'':'<br>'+stats[result.secondary]+' +'+formatGrowth(result.secondaryGain))+'</td></tr>').join('')+'</tbody></table></section>'+
       (term.skillTraining?.length?'<section class="folio"><h2>기술 습득과 숙련</h2><ul>'+
         term.skillTraining.map(entry=>'<li>'+skillTrainingText(entry)+'</li>').join('')+'</ul></section>':'')+
-      '<section class="folio"><h2>학기 전후 능력치</h2><p class="total-line">능력치 상승 합계 <strong>+'+(total(term.after)-total(term.before))+'</strong></p><dl class="growth-grid">'+term.after.map((value,i)=>
-        '<div><dt>'+stats[i]+'</dt><dd>'+term.before[i]+'에서 '+value+' (+'+(value-term.before[i])+')</dd></div>').join('')+'</dl></section>'+
+      '<section class="folio"><h2>학기 전후 능력치</h2><p class="total-line">능력치 상승 합계 <strong>+'+formatGrowth(total(term.after)-total(term.before))+'</strong></p><dl class="growth-grid">'+term.after.map((value,i)=>
+        '<div><dt>'+stats[i]+'</dt><dd>'+wholeStat(term.before[i])+' → '+statReading(value)+' (+'+formatGrowth(value-term.before[i])+')</dd></div>').join('')+'</dl></section>'+
       '<section class="folio"><h2>학기 중 있었던 일</h2><ol class="semester-events">'+term.events.map(event=>
         '<li><strong>'+event.month+'월</strong> '+$escape(event.text)+'</li>').join('')+'</ol></section>';
   }
@@ -517,17 +526,17 @@ $(function () {
     const row=(names,lines)=>'<table class="semester-grades"><thead><tr>'+names.map(name=>'<th scope="col">'+name+'</th>').join('')+'</tr></thead><tbody>'+lines.join('')+'</tbody></table>';
     return '<div class="review-banner"><strong>종합 등급 '+annual.grade+' · 평균 '+annual.average.toFixed(1)+'점</strong><p>'+progress+'</p></div>'+
       (annual.elapsed<12?'<p class="small">기록된 '+annual.elapsed+'개월을 기준으로 집계했습니다.</p>':'')+
-      '<dl class="review-metrics"><div><dt>수강 건수</dt><dd>'+annual.results.length+'건</dd></div><div><dt>학기 기록</dt><dd>'+annual.terms.length+'개</dd></div><div><dt>능력치 성장</dt><dd>+'+total(annual.growth)+'</dd></div></dl>'+
+      '<dl class="review-metrics"><div><dt>수강 건수</dt><dd>'+annual.results.length+'건</dd></div><div><dt>학기 기록</dt><dd>'+annual.terms.length+'개</dd></div><div><dt>능력치 성장</dt><dd>+'+formatGrowth(total(annual.growth))+'</dd></div></dl>'+
       '<section class="folio"><h2>학년 과목별 성적</h2>'+row(['과목','학기','성적'],annual.results.map(result=>
         '<tr><th scope="row">'+result.name+'</th><td>'+result.term+'학기</td><td>'+result.grade+' · '+result.score+'점</td></tr>'))+'</section>'+
       '<section class="folio"><h2>학년 전후 능력치</h2>'+row(['능력치','학년 초','학년 말','변화'],stats.map((stat,i)=>
-        '<tr><th scope="row">'+stat+'</th><td>'+annual.before[i]+'</td><td>'+annual.after[i]+'</td><td>+'+annual.growth[i]+'</td></tr>'))+'</section>'+
+        '<tr><th scope="row">'+stat+'</th><td>'+wholeStat(annual.before[i])+'</td><td>'+statReading(annual.after[i])+'</td><td>+'+formatGrowth(annual.growth[i])+'</td></tr>'))+'</section>'+
       '<section class="folio"><h2>'+(annual.remaining?'졸업 전망':'졸업 능력치')+'</h2>'+
-      (annual.remaining?'<p class="small">이번 학년과 같은 성장 속도로 남은 '+(annual.remaining/6)+'학기를 마친다고 가정한 수치입니다.</p>':'')+
-      '<p class="total-line">능력치 합계 <strong>'+total(annual.projected)+'</strong> · '+(annual.remaining?'예상 강점 ':'강점 ')+
+      (annual.remaining?'<p class="small">이번 학년과 같은 수강 보상이 남은 '+(annual.remaining/6)+'학기에도 이어진다고 가정한 수치입니다.</p>':'')+
+      '<p class="total-line">능력치 합계 <strong>'+total(annual.projected.map(wholeStat))+'</strong> · '+(annual.remaining?'예상 강점 ':'강점 ')+
         stats.filter((_,i)=>annual.projected[i]===Math.max(...annual.projected)).join(' · ')+'</p>'+
       row(['능력치','현재',annual.remaining?'졸업 예상':'졸업'],stats.map((stat,i)=>
-        '<tr><th scope="row">'+stat+'</th><td>'+annual.after[i]+'</td><td>'+annual.projected[i]+'</td></tr>'))+'</section>';
+        '<tr><th scope="row">'+stat+'</th><td>'+wholeStat(annual.after[i])+'</td><td>'+statReading(annual.projected[i])+'</td></tr>'))+'</section>';
   }
   function yearReview(){
     const year=s.semesterReports.at(-1).year;
@@ -545,7 +554,7 @@ $(function () {
   function career(){
     return heading('아카데미 졸업 · '+age()+'세','첫 직업 선택','주요 능력과 월 기본 수입을 비교하고 첫 진로를 정하세요.')+
       '<div class="review-banner"><strong>졸업 시 가장 높은 능력 · '+strongest(s.values)+'</strong><p>모든 직업을 선택할 수 있습니다.</p></div>'+
-      jobs.map((list,i)=>'<details class="folio career-path"><summary>'+stats[i]+' 특화 <b>'+s.values[i]+'</b></summary>'+list.map((name,j)=>button('job-'+i+'-'+j,name,stats[i]+' 성장 · 월 기본 수입 '+(9+i+j)+'은')).join('')+'</details>').join('');
+      jobs.map((list,i)=>'<details class="folio career-path"><summary>'+stats[i]+' 특화 <b>'+wholeStat(s.values[i])+'</b></summary>'+list.map((name,j)=>button('job-'+i+'-'+j,name,stats[i]+' 성장 · 월 기본 수입 '+(9+i+j)+'은')).join('')+'</details>').join('');
   }
   function bondView(){
     const states=['지인','연인','약혼','배우자'];
@@ -602,7 +611,9 @@ $(function () {
     return achievements.filter(([,test])=>test(s)).map(([label])=>label);
   }
   function characterStats(){
-    return '<h2>기본 능력치</h2>'+statView(s.values)+
+    return '<h2>기본 능력치</h2>'+statView(s.values)+'<p>능력치 기준 마법 경지 <strong>'+academy.magicClass(s.values)+'</strong></p>'+
+      '<h2>능력치별 경지</h2><dl class="growth-grid">'+s.values.map((value,i)=>
+        '<div><dt>'+stats[i]+'</dt><dd>'+academy.statTier(value)+'</dd></div>').join('')+'</dl>'+
       '<h2>재산</h2><p>소지금 '+money(s.money)+' · 파티 공동 자금 '+money(s.partyFunds)+'</p>'+
       '<h2>달성한 인생 목표</h2><p>'+(titleList().join(' · ')||'진행 중')+'</p>'+
       (s.house?'<p>가문 · '+$escape(s.house)+'</p>':'')+(s.spouse!==null?'<p>배우자 · '+people[s.spouse].name+' · 가족 추억 '+s.family+'회</p>':'');
@@ -617,14 +628,26 @@ $(function () {
         tier===groups.length-1?'<p class="character-note">최고 등급 장비를 갖췄습니다.</p>':
         '<p class="character-note">다음 등급 '+groups[tier+1]+' · 강화 비용 '+money((tier+1)*5000)+'</p>');
   }
-  function skillTrainingText({skill,previous,level}){
+  function skillTrainingText({skill,previous,level,earned}) {
     const name=academy.skills[skill].name;
-    return previous?name+' 숙련 Lv.'+previous+' → Lv.'+level:name+' 습득 · Lv.'+level;
+    if(!previous)return name+' 습득 · Lv.'+level;
+    const result=previous===level?name+' · Lv.'+level:name+' 숙련 Lv.'+previous+' → Lv.'+level;
+    return result+(earned?' · 숙련 경험치 +'+earned:'');
   }
-  function advanceSkill(skill){
-    const level=Math.min(academy.maxSkillLevel,(s.skills[skill]??0)+1);
+  function advanceSkill(skill, experience){
+    const previous=s.skills[skill]??0;
+    if(!previous){
+      s.skills[skill]=1;
+      s.skillXp[skill]=0;
+      return {skill,previous,level:1,earned:0};
+    }
+    const oldXp=s.skillXp[skill]??0;
+    const earned=Math.min(experience,(academy.maxSkillLevel-previous)*100-oldXp);
+    const totalXp=oldXp+earned;
+    const level=previous+Math.floor(totalXp/100);
     s.skills[skill]=level;
-    return level;
+    s.skillXp[skill]=totalXp%100;
+    return {skill,previous,level,earned};
   }
   function currentSkillPracticeTerm(){
     return Math.floor(s.turn/6);
@@ -637,9 +660,7 @@ $(function () {
   function trainSkill(skill){
     if(page!=='record'||!canTrainSkill(skill))return;
     if(s.stage==='adult'&&!effort(skillPracticeStamina))return;
-    const previous=s.skills[skill];
-    const level=advanceSkill(skill);
-    const message=skillTrainingText({skill,previous,level});
+    const message=skillTrainingText(advanceSkill(skill,100));
     if(s.stage==='school'){
       s.lastSkillPracticeTerm=currentSkillPracticeTerm();
       schoolEvent(message);
@@ -661,8 +682,9 @@ $(function () {
           const skill=academy.skills[id];
           return '<li class="character-item"><span class="character-icon" aria-hidden="true">'+(skill.major==='sword'?'⚔':'✦')+'</span>'+
             '<div><h3>'+skill.name+' · Lv.'+level+'</h3><p>'+skill.detail+'</p>'+
+            '<p>'+(level>=academy.maxSkillLevel?'최대 숙련도':'숙련 경험치 '+(s.skillXp[id]??0)+' / 100')+'</p>'+
             (canTrainSkill(id)?button('train-skill-'+id,skill.name+' 수련'):'')+'</div></li>';
-        }).join('')+'</ul>':'<p class="character-note">6학년부터 기술 선택 과목에서 E 이상을 받으면 여기에 기술이 등록됩니다.</p>')+
+        }).join('')+'</ul>':'<p class="character-note">6학년부터 기술 선택 과목에서 C 이상을 받으면 여기에 기술이 등록됩니다.</p>')+
       '<h2>별탑 원정 기본 행동</h2>'+
       (s.stage==='adult'?(s.floor===bosses.length?'<p class="character-note">별탑 원정을 완료했습니다.</p>':''):
         '<p class="character-note">졸업 후 별탑 원정에서 사용할 수 있습니다.</p>')+

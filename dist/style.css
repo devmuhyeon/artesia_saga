@@ -240,6 +240,17 @@ html { scroll-padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
 .campus-event { margin-block-start: 8px; padding: 9px 12px; border-inline-start: 3px solid var(--green); background: #e5eddf; }
 .campus-event p { margin-block-start: 3px; }
 
+.stats > div {
+  grid-template-columns: 2.5rem minmax(0, 1fr) minmax(5.2rem, max-content);
+}
+.stats dd small,
+.growth-grid dd small,
+.semester-grades td small {
+  display: block;
+  font-size: .75rem;
+  font-weight: 500;
+}
+
 @media (max-width: 480px) {
   main {
     padding-bottom: calc(96px + env(safe-area-inset-bottom));
